@@ -1,14 +1,36 @@
 from opcua import Server
+import random
+import time
 from device_codes import Codes
+
 
 URI = "opc.tcp://0.0.0.0:4840/server/"
 GENERAL_NAMESPACE = 'http://object.test'
+
+
+class SubHandler(object):
+    """
+    Subscription Handler. To receive events from server for a subscription
+    """
+
+    def datachange_notification(self, node, val, data):
+        print("Python: New data change event", node, val)
+
+    def event_notification(self, event):
+        print("Python: New event", event)
 
 
 class OPCServer:
     server = Server()
     server.set_endpoint(URI)
     server.set_server_name("OPC-Mock")
+
+    handler = SubHandler()
+    sub = None
+
+    @classmethod
+    def create_handler(cls, instance):
+        return cls.sub.subscribe_data_change(instance)
 
     @classmethod
     def register_namespace(cls, name: str):
@@ -22,6 +44,7 @@ class OPCServer:
     @classmethod
     def start(cls):
         cls.server.start()
+        cls.sub = cls.server.create_subscription(5, cls.handler)
 
 
 class OPCObject:
@@ -30,9 +53,14 @@ class OPCObject:
         self.instance = OPCServer.create_object_in_namespace(self.namespace, name)
         self.variables = self.instance.add_variable(self.namespace, f"{name}_vars", variables)
         self.variables.set_writable()   # Set node as writable by clients. A node is always writable on server side.
+        OPCServer.create_handler(self.variables)
 
-    def set_variable_value(self, values):
-        self.variables.set_value(values)    # Set value of a node
+    def set_value(self, values: list):
+        self.variables.set_value(values)
+        OPCServer.create_handler(self.variables)
+
+    def get_value(self):
+        return self.variables.get_value()
 
 
 def generate_objects() -> list[object]:
@@ -52,8 +80,20 @@ def generate_objects() -> list[object]:
     return _objects
 
 
-if __name__ == '__main__':
-    objects = generate_objects()
-    print([val.instance.get_browse_name().Name for val in objects])
+def shuffle_objects(objects, iterations: int, sleep: int | float = None):
 
+    for step in range(iterations):
+        for val in objects:
+            values = val.get_value()
+            random.shuffle(values)
+            val.set_value(values)
+            # val.handler = OPCServer.create_handler(val.variables)
+            if sleep:
+                time.sleep(sleep)
+
+
+if __name__ == '__main__':
     OPCServer.start()
+    objects = generate_objects()
+    shuffle_objects(objects, 5)
+    print("Total objects:\n", [val.instance.get_browse_name().Name for val in objects])
